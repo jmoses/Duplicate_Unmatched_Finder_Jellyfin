@@ -104,36 +104,40 @@ if [ "${EXCLUDE_FOLDERS:-0}" -eq 1 ]; then
   mv "${TMP_JSON}.nofolder" "$TMP_JSON"
 fi
 
+JQ='
+  def dupkey:
+    if .Type == "Movie" then ["Movie", (.Name//""), (.ProductionYear//"")]
+    elif .Type == "Episode" then ["Episode", (.SeriesName//""), ((.ParentIndexNumber|tostring)//""), ((.IndexNumber|tostring)//"")]
+    elif .Type == "Season" then ["Season", (.SeriesName//""), ((.IndexNumber|tostring)//"")]
+    elif .Type == "Series" then ["Series", (.Name//"")]
+    else [(.Type//""), (.Name//"")]
+    end;
+  .Items as $items
+  | ($items | group_by(dupkey)
+     | map(select(length > 1) | .[].Id)
+     | reduce .[] as $id ({}; .[$id] = true)
+    ) as $dup
+  | $items[]
+  | . as $it
+  | (($it.ProviderIds == null) or (($it.ProviderIds | length) == 0)) as $is_unmatched
+  | (($dup[$it.Id] // false) == true) as $is_duplicate
+  | select( ( ($want_unmatched == 1) and $is_unmatched )
+         or ( ($want_duplicates == 1) and $is_duplicate ) )
+  | [ .Type, .Name, .Path, .Id,
+      ( [ (if $is_unmatched then "Unmatched" else empty end),
+          (if $is_duplicate then "Duplicate" else empty end) ] | join(";") )
+    ]
+'
+
 # jq program (inlined below) computes 'Status' and filters by selected mode
 if [ -n "$OUTFILE" ]; then
   # CSV with header: Type,Name,Path,ID,Status
   {
     echo "Type,Name,Path,ID,Status"
-    jq -r --argjson want_unmatched "$WANT_UNMATCHED" --argjson want_duplicates "$WANT_DUPLICATES" '
-      def dupkey:
-        if .Type == "Movie" then ["Movie", (.Name//""), (.ProductionYear//"")]
-        elif .Type == "Episode" then ["Episode", (.SeriesName//""), ((.ParentIndexNumber|tostring)//""), ((.IndexNumber|tostring)//"")]
-        elif .Type == "Season" then ["Season", (.SeriesName//""), ((.IndexNumber|tostring)//"")]
-        elif .Type == "Series" then ["Series", (.Name//"")]
-        else [(.Type//""), (.Name//"")]
-        end;
-      .Items as $items
-      | ($items | group_by(dupkey)
-         | map(select(length > 1) | .[].Id)
-         | reduce .[] as $id ({}; .[$id] = true)
-        ) as $dup
-      | $items[]
-      | . as $it
-      | (($it.ProviderIds == null) or (($it.ProviderIds | length) == 0)) as $is_unmatched
-      | (($dup[$it.Id] // false) == true) as $is_duplicate
-      | select( ( ($want_unmatched == 1) and $is_unmatched )
-             or ( ($want_duplicates == 1) and $is_duplicate ) )
-      | [ .Type, .Name, .Path, .Id,
-          ( [ (if $is_unmatched then "Unmatched" else empty end),
-              (if $is_duplicate then "Duplicate" else empty end) ] | join(";") )
-        ]
-      | @csv
-    ' "$TMP_JSON"
+    jq -r \
+        --argjson want_unmatched "$WANT_UNMATCHED" \
+        --argjson want_duplicates "$WANT_DUPLICATES" \
+        "${JQ} | @csv"
   } > "$OUTFILE"
   echo "Wrote CSV to: $OUTFILE" >&2
   echo ""
@@ -143,30 +147,10 @@ else
   echo "Results:"
   echo "--------"
   echo ""
-  jq -r --argjson want_unmatched "$WANT_UNMATCHED" --argjson want_duplicates "$WANT_DUPLICATES" '
-    def dupkey:
-      if .Type == "Movie" then ["Movie", (.Name//""), (.ProductionYear//"")]
-      elif .Type == "Episode" then ["Episode", (.SeriesName//""), ((.ParentIndexNumber|tostring)//""), ((.IndexNumber|tostring)//"")]
-      elif .Type == "Season" then ["Season", (.SeriesName//""), ((.IndexNumber|tostring)//"")]
-      elif .Type == "Series" then ["Series", (.Name//"")]
-      else [(.Type//""), (.Name//"")]
-      end;
-    .Items as $items
-    | ($items | group_by(dupkey)
-       | map(select(length > 1) | .[].Id)
-       | reduce .[] as $id ({}; .[$id] = true)
-      ) as $dup
-    | $items[]
-    | . as $it
-    | (($it.ProviderIds == null) or (($it.ProviderIds | length) == 0)) as $is_unmatched
-    | (($dup[$it.Id] // false) == true) as $is_duplicate
-    | select( ( ($want_unmatched == 1) and $is_unmatched )
-           or ( ($want_duplicates == 1) and $is_duplicate ) )
-    | [ .Type, .Name, .Path, .Id,
-        ( [ (if $is_unmatched then "Unmatched" else empty end),
-            (if $is_duplicate then "Duplicate" else empty end) ] | join(";") )
-      ]
-    | @tsv
-  ' "$TMP_JSON"
+  jq -r \
+      --argjson want_unmatched "$WANT_UNMATCHED" \
+      --argjson want_duplicates "$WANT_DUPLICATES" \
+      "${JQ} | @tsv" \ 
+      "$TMP_JSON"
   echo ""
 fi
