@@ -8,8 +8,8 @@ set -e
 # --- Configure these ---
 # To get your API key - log in to Jellyfin with an superuser/admin account and then click dashboard then API keys
 # Then Get new key...
-JellyfinURL="http://192.168.0.1:8096"
-APIKEY="123456789"
+JellyfinURL="http://localhost:8096"
+APIKEY="cdccf503d3be4636a1bfd434eaa46ffd"
 # -----------------------
 
 echo ""
@@ -58,6 +58,7 @@ LIB=$(sed -n "${CHOICE}p" "$TMP_LIBS" | cut -f2)
 echo "Selected library: ${SEL_NAME:-unknown} ($LIB)" >&2
 
 echo ""
+
 
 # Ask search mode
 echo "What would you like to search for?"
@@ -117,7 +118,8 @@ JQ='
      | map(select(length > 1) | .[].Id)
      | reduce .[] as $id ({}; .[$id] = true)
     ) as $dup
-  | $items[]
+  | $items
+  | sort_by(.Name)[]
   | . as $it
   | (($it.ProviderIds == null) or (($it.ProviderIds | length) == 0)) as $is_unmatched
   | (($dup[$it.Id] // false) == true) as $is_duplicate
@@ -137,7 +139,8 @@ if [ -n "$OUTFILE" ]; then
     jq -r \
         --argjson want_unmatched "$WANT_UNMATCHED" \
         --argjson want_duplicates "$WANT_DUPLICATES" \
-        "${JQ} | @csv"
+        "${JQ} | @csv" \
+        "$TMP_JSON"
   } > "$OUTFILE"
   echo "Wrote CSV to: $OUTFILE" >&2
   echo ""
@@ -150,7 +153,7 @@ else
   jq -r \
       --argjson want_unmatched "$WANT_UNMATCHED" \
       --argjson want_duplicates "$WANT_DUPLICATES" \
-      "${JQ} | @tsv" \ 
+      "${JQ} | @tsv" \
       "$TMP_JSON"
   echo ""
 fi
